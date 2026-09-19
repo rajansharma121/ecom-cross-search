@@ -564,7 +564,7 @@ _NON_PRODUCT_URL_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"/all?", re.I),                  # Amazon all-deals
     re.compile(r"amazon\.in/[\w-]+/ref=", re.I),  # Amazon redirect/referral URLs
     re.compile(r"meesho\.com/[a-z]+/pl/", re.I),   # Meesho category listing
-    re.compile(r"flipkart\.com/.*pr?", re.I),       # Flipkart search results
+    re.compile(r"flipkart\.com/(?:search\?|pr\b|pr\?)", re.I),       # Flipkart search results
     re.compile(r"/compare/", re.I),
     re.compile(r"/product-list/", re.I),
     re.compile(r"/results/", re.I),
@@ -787,6 +787,7 @@ def build_search_query(
     title: str,
     extra: str = "",
     url_slug_title: str | None = None,
+    platform: str = "",
 ) -> list[str]:
     """Build 1-3 clean search query variants from product info.
 
@@ -826,6 +827,18 @@ def build_search_query(
         slug_q = _clean_query(_title_from_url_slug("https://example.com/" + title.replace(" ", "-")))
     if slug_q and len(slug_q.split()) >= 2:
         candidates.append(slug_q)
+
+    # Strategy 4 (Myntra): add platform hint when searching Myntra —
+    # ddgs only returns Myntra results when the query includes "myntra".
+    # This doesn't affect other platforms; only used when target is Myntra.
+    if platform == "myntra" and slug_q:
+        hinted = _clean_query(f"{slug_q} myntra")
+        if hinted and hinted.lower() not in {c.lower() for c in candidates}:
+            candidates.append(hinted)
+    elif platform == "myntra" and title:
+        hinted = _clean_query(f"{_clean_query(title)} myntra")
+        if hinted and hinted.lower() not in {c.lower() for c in candidates}:
+            candidates.append(hinted)
 
     # Strip generic words from all candidates
     for i, q in enumerate(candidates):
