@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cross-Search — compare across Amazon, Flipkart &amp; Meesho</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ledger:#1F2E28;
+    --ledger-deep:#182421;
+    --paper:#F5EFDD;
+    --paper-dim:#EAE2C8;
+    --gold:#D9A441;
+    --gold-deep:#B9822E;
+    --teal:#4F8F6B;
+    --brick:#C1553A;
+    --ink:#1F2E28;
+    --ink-soft:#57645C;
+  }
+
+  *{box-sizing:border-box;}
+
+  body{
+    margin:0;
+    background:var(--ledger);
+    background-image:
+      radial-gradient(circle at 18% 8%, rgba(217,164,65,0.07), transparent 40%),
+      radial-gradient(circle at 85% 92%, rgba(79,143,107,0.08), transparent 45%);
+    color:var(--paper);
+    font-family:'IBM Plex Sans', sans-serif;
+    min-height:100vh;
+  }
+
+  .wrap{
+    max-width:900px;
+    margin:0 auto;
+    padding:64px 24px 96px;
+  }
+
+  header.hero{
+    text-align:left;
+    margin-bottom:48px;
+  }
+
+  .hero-kicker{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px;
+    color:var(--gold);
+    letter-spacing:0.02em;
+    margin-bottom:14px;
+  }
+
+  h1{
+    font-family:'Fraunces', serif;
+    font-optical-sizing:auto;
+    font-weight:500;
+    font-size:clamp(34px, 5vw, 52px);
+    line-height:1.08;
+    margin:0 0 18px;
+    max-width:14ch;
+  }
+
+  .hero-sub{
+    font-size:16px;
+    line-height:1.6;
+    color:#C9D6CD;
+    max-width:52ch;
+    margin:0;
+  }
+
+  form.search{
+    margin-top:40px;
+    background:var(--paper);
+    border-radius:4px;
+    padding:22px;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.28);
+  }
+
+  .search-row{
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  input[type="text"]{
+    flex:1 1 320px;
+    padding:16px 16px;
+    border:1.5px solid #CFC4A0;
+    border-radius:2px;
+    background:#FFFDF6;
+    color:var(--ink);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:14.5px;
+  }
+
+  input[type="text"]:focus{
+    outline:none;
+    border-color:var(--gold-deep);
+  }
+
+  input[type="text"]::placeholder{
+    color:#9C9377;
+  }
+
+  button.submit{
+    padding:16px 28px;
+    background:var(--gold);
+    color:var(--ledger-deep);
+    border:none;
+    border-radius:2px;
+    font-family:'IBM Plex Sans', sans-serif;
+    font-weight:600;
+    font-size:15px;
+    cursor:pointer;
+    transition:background 0.15s ease, transform 0.1s ease;
+  }
+
+  button.submit:hover{ background:var(--gold-deep); }
+  button.submit:active{ transform:translateY(1px); }
+  button.submit:disabled{ background:#C9BFA0; cursor:default; }
+
+  .search-hint{
+    margin-top:12px;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+
+  .status-line{
+    margin-top:28px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13.5px;
+    color:var(--gold);
+    display:none;
+  }
+
+  .status-line.visible{ display:block; }
+
+  .error-box{
+    margin-top:28px;
+    padding:16px 18px;
+    background:rgba(193,85,58,0.16);
+    border:1px solid rgba(193,85,58,0.4);
+    border-radius:3px;
+    color:#F1C4B8;
+    font-size:14px;
+    display:none;
+  }
+
+  .error-box.visible{ display:block; }
+
+  section.results{
+    margin-top:52px;
+    display:none;
+  }
+
+  section.results.visible{ display:block; }
+
+  .source-block{
+    display:flex;
+    gap:20px;
+    align-items:flex-start;
+    padding-bottom:32px;
+    border-bottom:1px dashed rgba(245,239,221,0.28);
+    margin-bottom:36px;
+  }
+
+  .source-img{
+    width:96px;
+    height:96px;
+    border-radius:3px;
+    object-fit:cover;
+    background:var(--paper-dim);
+    flex-shrink:0;
+  }
+
+  .source-meta .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px;
+    color:var(--gold);
+    margin-bottom:8px;
+  }
+
+  .source-meta h2{
+    font-family:'Fraunces', serif;
+    font-weight:500;
+    font-size:22px;
+    margin:0 0 8px;
+    line-height:1.3;
+  }
+
+  .source-meta .price{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:17px;
+    color:var(--paper);
+  }
+
+  .query-note{
+    font-size:13px;
+    color:#A7B4AC;
+    margin-top:10px;
+  }
+
+  .platform-group{
+    margin-bottom:40px;
+  }
+
+  .platform-heading{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    margin-bottom:16px;
+  }
+
+  .platform-heading h3{
+    font-family:'Fraunces', serif;
+    font-weight:500;
+    font-size:19px;
+    margin:0;
+  }
+
+  .platform-heading .count{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12.5px;
+    color:var(--gold);
+  }
+
+  .chit-row{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+
+  .chit{
+    background:var(--paper);
+    color:var(--ink);
+    border-radius:2px;
+    padding:18px 20px;
+    display:flex;
+    gap:16px;
+    align-items:flex-start;
+    position:relative;
+    box-shadow: 0 10px 22px rgba(0,0,0,0.18);
+  }
+
+  .chit::before{
+    content:"";
+    position:absolute;
+    top:0; bottom:0; left:0;
+    width:4px;
+    background:var(--teal);
+    border-radius:2px 0 0 2px;
+  }
+
+  .chit.blocked::before{ background:var(--brick); }
+
+  .chit-img{
+    width:64px;
+    height:64px;
+    border-radius:2px;
+    object-fit:cover;
+    background:var(--paper-dim);
+    flex-shrink:0;
+  }
+
+  .chit-body{ flex:1; min-width:0; }
+
+  .chit-title{
+    font-size:14.5px;
+    font-weight:600;
+    line-height:1.4;
+    margin-bottom:6px;
+  }
+
+  .chit-title a{
+    color:var(--ink);
+    text-decoration:none;
+    border-bottom:1px solid rgba(31,46,40,0.25);
+  }
+
+  .chit-title a:hover{ border-bottom-color:var(--ink); }
+
+  .chit-price{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:14px;
+    color:#2F4A3C;
+    margin-bottom:6px;
+  }
+
+  .chit-flag{
+    font-size:12px;
+    color:var(--ink-soft);
+  }
+
+  .empty-note{
+    font-size:14px;
+    color:#A7B4AC;
+    font-style:italic;
+  }
+
+  .no-matches{
+    padding:24px;
+    background:rgba(217,164,65,0.1);
+    border:1px dashed rgba(217,164,65,0.4);
+    border-radius:3px;
+    font-size:14.5px;
+    line-height:1.6;
+    color:#E9DCB7;
+  }
+
+  footer{
+    margin-top:64px;
+    font-size:12.5px;
+    color:#7C897F;
+    line-height:1.6;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition:none !important; }
+  }
+
+  @media (max-width:560px){
+    .wrap{ padding:40px 18px 72px; }
+    .source-block{ flex-direction:column; }
+    .chit{ flex-direction:column; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="hero-kicker">CROSS-SEARCH LEDGER</div>
+    <h1>Find the same product on three marketplaces.</h1>
+    <p class="hero-sub">Paste a product link from Amazon.in, Flipkart, or Meesho. The tool reads it, then checks the other two for matching listings.</p>
+  </header>
+
+  <form class="search" id="search-form">
+    <div class="search-row">
+      <input type="text" id="url-input" placeholder="https://www.amazon.in/dp/..." autocomplete="off">
+      <button type="submit" class="submit" id="submit-btn">Search</button>
+    </div>
+    <div class="search-hint">Works with any Amazon.in, Flipkart, or Meesho product page link.</div>
+    <div class="status-line" id="status-line"></div>
+    <div class="error-box" id="error-box"></div>
+  </form>
+
+  <section class="results" id="results">
+    <div class="source-block">
+      <img class="source-img" id="source-img" src="" alt="" style="display:none;">
+      <div class="source-meta">
+        <div class="eyebrow" id="source-platform"></div>
+        <h2 id="source-title"></h2>
+        <div class="price" id="source-price"></div>
+        <div class="query-note" id="query-note"></div>
+      </div>
+    </div>
+
+    <div id="platform-groups"></div>
+  </section>
+
+  <footer>
+    Prices are best-effort and may be stale — always verify on the live listing. These sites actively block automated access, so some pages won't extract cleanly.
+  </footer>
+
+</div>
+
+<script>
+const PLATFORM_LABELS = { amazon: "Amazon India", flipkart: "Flipkart", meesho: "Meesho" };
+const PLATFORM_ORDER = ["amazon", "flipkart", "meesho"];
+
+const form = document.getElementById("search-form");
+const urlInput = document.getElementById("url-input");
+const submitBtn = document.getElementById("submit-btn");
+const statusLine = document.getElementById("status-line");
+const errorBox = document.getElementById("error-box");
+const resultsSection = document.getElementById("results");
+const platformGroups = document.getElementById("platform-groups");
+
+function setStatus(text){
+  statusLine.textContent = text;
+  statusLine.classList.toggle("visible", !!text);
+}
+
+function setError(text){
+  errorBox.textContent = text;
+  errorBox.classList.toggle("visible", !!text);
+}
+
+function escapeHtml(s){
+  return (s || "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  }[c]));
+}
+
+function renderChit(item){
+  const blockedClass = item.blocked ? " blocked" : "";
+  const img = item.image_url
+    ? `<img class="chit-img" src="${escapeHtml(item.image_url)}" alt="">`
+    : `<div class="chit-img"></div>`;
+  const flags = [];
+  if (!item.ok) flags.push("page blocked / partial data");
+  if (item.from_url_slug) flags.push("title guessed from link");
+
+  return `
+    <div class="chit${blockedClass}">
+      ${img}
+      <div class="chit-body">
+        <div class="chit-title"><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a></div>
+        <div class="chit-price">${escapeHtml(item.price)}</div>
+        ${item.score != null && item.score !== undefined ? `<div class="chit-flag">Match ${item.score}%</div>` : ""}
+        ${flags.length ? `<div class="chit-flag">${escapeHtml(flags.join(" · "))}</div>` : ""}
+      </div>
+    </div>`;
+}
+
+function renderResults(data){
+  document.getElementById("source-platform").textContent =
+    (PLATFORM_LABELS[data.source.platform] || data.source.platform) + " — source";
+  document.getElementById("source-title").textContent = data.source.title;
+  document.getElementById("source-price").textContent = data.source.price;
+
+  const img = document.getElementById("source-img");
+  if (data.source.image_url) {
+    img.src = data.source.image_url;
+    img.style.display = "block";
+  } else {
+    img.style.display = "none";
+  }
+
+  const queryNote = document.getElementById("query-note");
+  queryNote.textContent = data.query ? `Search query used: “${data.query}”` : "";
+
+  platformGroups.innerHTML = "";
+  const otherPlatforms = PLATFORM_ORDER.filter(p => p !== data.source.platform);
+  let anyResults = false;
+
+  otherPlatforms.forEach(platform => {
+    const items = (data.results && data.results[platform]) || [];
+    if (items.length) anyResults = true;
+
+    const group = document.createElement("div");
+    group.className = "platform-group";
+
+    const chits = items.length
+      ? items.map(renderChit).join("")
+      : `<div class="empty-note">No matching listings found on ${PLATFORM_LABELS[platform]}.</div>`;
+
+    group.innerHTML = `
+      <div class="platform-heading">
+        <h3>${PLATFORM_LABELS[platform]}</h3>
+        <span class="count">${items.length} result${items.length === 1 ? "" : "s"}</span>
+      </div>
+      <div class="chit-row">${chits}</div>
+    `;
+    platformGroups.appendChild(group);
+  });
+
+  if (!anyResults) {
+    const note = document.createElement("div");
+    note.className = "no-matches";
+    note.textContent = "No matches turned up on either platform. Try a link with a clearer, more specific product title.";
+    platformGroups.prepend(note);
+  }
+
+  resultsSection.classList.add("visible");
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const url = urlInput.value.trim();
+  setError("");
+  resultsSection.classList.remove("visible");
+
+  if (!url) {
+    setError("Please paste a product URL first.");
+    return;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Searching…";
+  setStatus("Reading the source listing, then checking the other two marketplaces — this can take 15–30 seconds.");
+
+  try {
+    const resp = await fetch("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      setError(data.error || "Something went wrong. Please try again.");
+      return;
+    }
+
+    setStatus("");
+    renderResults(data);
+  } catch (err) {
+    setError("Couldn't reach the search service. Check that the backend is running.");
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Search";
+    setStatus("");
+  }
+});
+</script>
+</body>
+</html>
