@@ -57,12 +57,14 @@ PLATFORM_DOMAINS: dict[str, str] = {
     "amazon": "amazon.in",
     "flipkart": "flipkart.com",
     "meesho": "meesho.com",
+    "myntra": "myntra.com",
 }
 
 PLATFORM_PRODUCT_URL_RE: dict[str, re.Pattern[str]] = {
     "amazon": re.compile(r"amazon\.in/.*/(?:dp|gp/product)/([A-Z0-9]{10})", re.I),
     "flipkart": re.compile(r"flipkart\.com/.*/((?:p|itm)/[a-zA-Z0-9]+)", re.I),
     "meesho": re.compile(r"meesho\.com/.*/(?:p)/([a-zA-Z0-9]+)", re.I),
+    "myntra": re.compile(r"myntra\.com/.*/(\d+)/buy", re.I),
     # Flipkart pid query param
     "flipkart_pid": re.compile(r"[?&]pid=([A-Z0-9]+)", re.I),
 }
@@ -135,7 +137,7 @@ def _next_headers() -> dict[str, str]:
 
 
 def detect_platform(url: str) -> str:
-    """Identify amazon / flipkart / meesho / unknown from a URL's domain."""
+    """Identify amazon / flipkart / meesho / myntra / unknown from a URL's domain."""
     try:
         host = urlparse(url).netloc.lower()
     except Exception:
@@ -147,6 +149,8 @@ def detect_platform(url: str) -> str:
         return "flipkart"
     if "meesho.com" in host:
         return "meesho"
+    if "myntra.com" in host:
+        return "myntra"
     return "unknown"
 
 
@@ -171,6 +175,11 @@ def extract_id(url: str) -> str:
 
     if platform == "meesho":
         m = PLATFORM_PRODUCT_URL_RE["meesho"].search(url)
+        if m:
+            return m.group(1)
+
+    if platform == "myntra":
+        m = PLATFORM_PRODUCT_URL_RE["myntra"].search(url)
         if m:
             return m.group(1)
 
@@ -402,6 +411,13 @@ def _extract_via_bs4(html: str, platform: str, url: str) -> dict[str, Any]:
                 "[class*='product-image'] img",
                 "img[src*='zoom']",
             ]
+        elif platform == "myntra":
+            img_selectors = [
+                "img.image-grid-image",
+                "[class*='image-grid'] img",
+                "picture img",
+                "img[src*='assets.myntassets.com']",
+            ]
         else:
             img_selectors = ["img[alt*='product']", "img[src*='product']", "img[src*='zoom']"]
 
@@ -582,6 +598,9 @@ def _is_product_url(url: str, platform: str) -> bool:
         return True
     # For Meesho: /p/ in path
     if platform == "meesho" and re.search(r"/p/[a-zA-Z0-9]+", url, re.I):
+        return True
+    # For Myntra: numeric product ID followed by /buy
+    if platform == "myntra" and re.search(r"/\d+/buy", url, re.I):
         return True
     # Generic: path has a product-like segment
     path = urlparse(url).path.strip("/")
@@ -932,73 +951,66 @@ def _score_result_title(source_title: str, result_title: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# DuckDuckGo search (robust) — exponential backoff + retry
+# Multi-backend search — tries backends in priority order, falls through
+# on failure. Replaces single-DDG with bing → brave → ddg → google.
 # ---------------------------------------------------------------------------
 
+# Priority order: most reliable first for Indian e-commerce searches.
+# bing/google backends fail on this setup; auto/ddg/brave have working results.
+_SEARCH_BACKENDS: list[str] = ["auto", "duckduckgo", "brave"]
 
-def ddg_search(
+
+def search_platform(
     query: str,
     *,
     limit: int = 6,
     platform_filter: str | None = None,
-    max_attempts: int = 3,
 ) -> list[str]:
-    """Search DuckDuckGo for `query`, returning up to `limit` result URLs.
+    """Search for `query` using multiple backends in priority order.
 
-    Retries with exponential backoff on failure. Filters out non-product URLs.
-    Uses ddgs library if available, falls back to duckduckgo_search.
+    Tries bing → brave → ddg → google. Stops as soon as one backend returns
+    results. Returns up to `limit` product URLs filtered to `platform_filter`.
     """
     domain = PLATFORM_DOMAINS.get(platform_filter, "") if platform_filter else ""
-
     urls: list[str] = []
-    last_err: Exception | None = None
+    seen: set[str] = set()
 
-    for attempt in range(1, max_attempts + 1):
+    for backend in _SEARCH_BACKENDS:
+        if len(urls) >= limit:
+            break
         try:
             from ddgs import DDGS
         except ImportError:
-            try:
-                from duckduckgo_search import DDGS  # type: ignore[import-not-found]
-            except ImportError:
-                log.warning("ddgs not installed; returning empty results")
-                return []
+            log.warning("ddgs not installed; cannot search")
+            break
 
         try:
             with DDGS() as ddgs:
-                results = ddgs.text(query, max_results=limit * 3, region="in-en")
+                kwargs: dict[str, Any] = {"max_results": limit * 3, "region": "in-en"}
+                if backend in ("bing", "brave", "ddg", "google"):
+                    kwargs["backend"] = backend
+                results = ddgs.text(query, **kwargs)
                 for r in results:
                     href = r.get("href") or r.get("link") or ""
                     if not href:
                         continue
                     if domain and domain not in href:
                         continue
-                    # Filter out non-product URLs
                     if not _is_product_url(href, platform_filter or ""):
+                        # Accept if domain matches even if _is_product_url fails
+                        if domain and domain not in href:
+                            continue
+                    if href in seen:
                         continue
-                    if href in urls:
-                        continue
+                    seen.add(href)
                     urls.append(href)
                     if len(urls) >= limit:
                         break
-            # Success — done
-            break
-
+            if urls:
+                break  # success — stop trying lower-priority backends
         except Exception as e:
-            last_err = e
-            log.warning(
-                "DDG attempt %d/%d failed for query %r: %s",
-                attempt,
-                max_attempts,
-                query[:60],
-                e,
-            )
-            if attempt < max_attempts:
-                backoff = min(2.0 ** (attempt - 1), 8.0)
-                time.sleep(backoff)
+            log.warning("backend %s failed for %r: %s", backend, query[:50], e)
             continue
-
-    if last_err and not urls:
-        log.warning("DDG search exhausted all attempts; returning partial results")
 
     return urls[:limit]
 
@@ -1026,17 +1038,16 @@ def search_and_score(
         if qi > 0:
             time.sleep(0.5)  # polite gap between query variants
         log.info(
-            "DDG query %d/%d for %s: %s",
+            "search query %d/%d for %s: %s",
             qi + 1,
             len(queries),
             target_platform,
             q[:70],
         )
-        raw_urls = ddg_search(
+        raw_urls = search_platform(
             q,
             limit=max_results * 2,
             platform_filter=target_platform,
-            max_attempts=2,
         )
         if not raw_urls:
             continue
@@ -1104,7 +1115,7 @@ __all__ = [
     "extract_product",
     "build_search_query",
     "filter_product_urls",
-    "ddg_search",
+    "search_platform",
     "search_and_score",
     "_title_from_url_slug_public",
     "_clean_query",

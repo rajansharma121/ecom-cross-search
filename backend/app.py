@@ -30,7 +30,7 @@ from cross_search import (
     extract_id,
     extract_product,
     filter_product_urls,
-    ddg_search,
+    search_platform,
     search_and_score,
     _title_from_url_slug_public,
     _strip_generic_words,
@@ -72,7 +72,7 @@ def api_search() -> Any:
             {
                 "error": (
                     "Can't identify the platform for that URL. "
-                    "Supported: amazon.in, flipkart.com, meesho.com."
+                    "Supported: amazon.in, flipkart.com, meesho.com, myntra.com."
                 )
             }
         ), 400
