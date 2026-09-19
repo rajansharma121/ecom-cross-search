@@ -95,13 +95,12 @@ def api_search() -> Any:
         title=src.get("title") or "",
         extra="",
         url_slug_title=_title_from_url_slug_public(url),
+        platform=platform,
     )
 
-    # --- Search the OTHER two platforms (scored + deduped) ---
+    # --- Search the OTHER platforms (scored + deduped) ---
     results: dict[str, list[dict[str, Any]]] = {}
-    for target_platform, domain in [("amazon", "amazon.in"),
-                                     ("flipkart", "flipkart.com"),
-                                     ("meesho", "meesho.com")]:
+    for target_platform in ("amazon", "flipkart", "meesho", "myntra"):
         if target_platform == platform:
             continue  # skip source platform
 
