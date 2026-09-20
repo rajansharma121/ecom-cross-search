@@ -557,22 +557,24 @@ def _extract_via_browser(url: str, platform: str) -> dict[str, Any]:
 # Known non-product URL patterns to filter out from DDG results
 _NON_PRODUCT_URL_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"/q/[^/]+$", re.I),            # Flipkart search pages
-    re.compile(r"/s?[?].*", re.I),              # Search query URLs
     re.compile(r"/browse(/.*)?$", re.I),        # Meesho browse
     re.compile(r"/category", re.I),             # Category pages
-    re.compile(r"/search", re.I),               # Search pages
-    re.compile(r"/all?", re.I),                  # Amazon all-deals
+    re.compile(r"/all?$", re.I),                # Amazon all-deals
     re.compile(r"amazon\.in/[\w-]+/ref=", re.I),  # Amazon redirect/referral URLs
     re.compile(r"meesho\.com/[a-z]+/pl/", re.I),   # Meesho category listing
-    re.compile(r"flipkart\.com/(?:search\?|pr\b|pr\?)", re.I),       # Flipkart search results
     re.compile(r"/compare/", re.I),
     re.compile(r"/product-list/", re.I),
     re.compile(r"/results/", re.I),
     re.compile(r"/trending/", re.I),
-    re.compile(r"/videos?", re.I),
+    re.compile(r"/videos?$", re.I),
     re.compile(r"/blog", re.I),
     re.compile(r"/articles?", re.I),
     re.compile(r"/news?", re.I),
+    # Flipkart search/listing pages: /search?..., /pr?..., /pr alone
+    re.compile(r"flipkart\.com/search(\?.*)?$", re.I),
+    re.compile(r"flipkart\.com/[\w/-]+/pr\b(\?.*)?$", re.I),
+    # pid= query param on flipkart (search result tracking)
+    re.compile(r"flipkart\.com/.*\bpid=", re.I),
 ]
 
 
@@ -840,6 +842,16 @@ def build_search_query(
         if hinted and hinted.lower() not in {c.lower() for c in candidates}:
             candidates.append(hinted)
 
+    # Add brand-first query variant for any platform — improves match quality
+    # when the source title is descriptive (e.g. "Boat 100 Wired Earphone").
+    # Only adds if we have at least one candidate already.
+    if title and len(title) >= 10 and _title_has_brand(title) and candidates:
+        brand, rest = _extract_brand_and_product(title)
+        if brand and rest:
+            brand_q = _clean_query(f"{brand} {rest}")
+            if brand_q and brand_q.lower() not in {c.lower() for c in candidates}:
+                candidates.append(brand_q)
+
     # Strip generic words from all candidates
     for i, q in enumerate(candidates):
         words = q.split()
@@ -970,6 +982,8 @@ def _score_result_title(source_title: str, result_title: str) -> float:
 
 # Priority order: most reliable first for Indian e-commerce searches.
 # bing/google backends fail on this setup; auto/ddg/brave have working results.
+# NOTE: we try each backend directly, and for the "auto" backend we also try
+# the other backends as fallbacks — same as myntra branch behavior.
 _SEARCH_BACKENDS: list[str] = ["auto", "duckduckgo", "brave"]
 
 
@@ -991,6 +1005,59 @@ def search_platform(
     for backend in _SEARCH_BACKENDS:
         if len(urls) >= limit:
             break
+        # --- Direct DDG HTML search (GET-based, most reliable).
+        # The ddgs library's API calls are often rate-limited from server IPs,
+        # but a plain GET to html.duckduckgo.com/html/ with a browser-like
+        # User-Agent works reliably (same approach as the standalone CLI).
+        # Retry up to 2 times on timeout/connection errors.
+        for _attempt in range(3):
+            try:
+                import urllib.parse as _urlparse
+                _ddg_url = "https://html.duckduckgo.com/html/"
+                _sess = requests.Session()
+                _sess.headers.update({
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                  "Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml",
+                })
+                _resp = _sess.get(
+                    f"{_ddg_url}?q={_urlparse.quote(query)}", timeout=10
+                )
+                if _resp.status_code == 200:
+                    n_before = len(urls)
+                    for _m in re.finditer(r"uddg=([^&\"]+)", _resp.text):
+                        _href = _urlparse.unquote(_m.group(1))
+                        if not _href.startswith("http"):
+                            continue
+                        if domain and domain not in _href:
+                            continue
+                        if _href in seen:
+                            continue
+                        seen.add(_href)
+                        urls.append(_href)
+                        if len(urls) >= limit:
+                            break
+                    if len(urls) > n_before:
+                        break  # got results
+                if _attempt < 2:
+                    time.sleep(1)  # brief gap before retry
+            except (requests.exceptions.Timeout,
+                    requests.exceptions.ConnectionError) as _e:
+                if _attempt < 2:
+                    time.sleep(1)
+                else:
+                    log.warning(
+                        "direct DDG HTML failed after 3 attempts for %r: %s",
+                        query[:50], _e,
+                    )
+            except Exception as _e:
+                log.warning("direct DDG HTML error for %r: %s", query[:50], _e)
+                break
+        if urls:
+            break  # success with direct DDG HTML
+
+        # --- Fallback: ddgs library backends (auto / duckduckgo / brave) ---
         try:
             from ddgs import DDGS
         except ImportError:
@@ -1000,7 +1067,9 @@ def search_platform(
         try:
             with DDGS() as ddgs:
                 kwargs: dict[str, Any] = {"max_results": limit * 3, "region": "in-en"}
-                if backend in ("bing", "brave", "ddg", "google"):
+                # Only pass backend= for specific backends — "auto" lets ddgs
+                # use its internal multi-engine selection (the default, most reliable).
+                if backend not in ("auto",):
                     kwargs["backend"] = backend
                 results = ddgs.text(query, **kwargs)
                 for r in results:
